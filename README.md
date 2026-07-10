@@ -56,4 +56,4 @@
 
 ## Архитектура компании «АгроТех Х»
 
-![zzz](https://raw.githubusercontent.com/m0u5ec/microservice-architecture/refs/heads/main/agrotech.puml)
+<-- ![zzz](https://raw.githubusercontent.com/m0u5ec/microservice-architecture/refs/heads/main/agrotech.puml) -->
