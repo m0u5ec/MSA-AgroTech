@@ -1,7 +1,7 @@
 @startuml Архитектура_АгроТех_Системы_v4
 
-!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
-!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4.puml
+!include <C4/C4_Container>
+
 ' === Участники ===
 Person(директор, "Директор хозяйства", "Управление через веб-портал")
 Person(агроном, "Агроном", "Использует мобильное приложение")
