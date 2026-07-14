@@ -1,0 +1,37 @@
+@startuml
+!include <C4/C4_Component>
+
+LAYOUT_WITH_LEGEND()
+
+title Диаграмма компонентов (C3) — Ультра-облегченное Ядро платформы для MVP
+
+' Внешние сущности
+Container(apps, "Приложения пользователя", "Web / Mobile", "Интерфейс для фермеров и администрации")
+Container(local_agent, "Локальный агент фермы", "HTTP Клиент", "Отправляет накопленные батчи данных по REST API")
+System_Ext(ext_ai, "ИИ-модель трекинга животных", "Внешний сервис глубокой аналитики видео")
+
+'ЯДРО ПЛАТФОРМЫ
+Container_Boundary(core_server, "Ядро платформы (Центральный сервер / Облако)") {
+    Component(api_gateway, "API Gateway & Auth", "FastAPI / Traefik", "• Единая точка входа\n• Валидация JWT-токенов на лету")
+    Component(packet_receiver, "Приемщик пакетов", "Python / FastAPI", "Принимает входящие пакеты от ферм и сохраняет в Redis")
+    ComponentDb(inter_db, "Промежуточная БД & Кэш", "Redis", "Хранение сырых данных с ферм")
+    Container_Boundary(business_logic_layer, "Модуль бизнес-логики и метрик") {
+        Component(api_controller, "Контроллер API приложений", "Python / FastAPI", "Обработка REST API запросов пользователей")
+        Component(metrics_engine, "Движок расчета метрик", "Python", "• Читает сырые данные из Redis\n• Рассчитывает базовые показатели")
+        Component(custom_metrics_constructor, "Конструктор пользовательских метрик", "Python", "Выполняет кастомные формулы администраторов")
+ContainerDb(central_db, "Центральная БД", "PostgreSQL / TimescaleDB", "Хранилище профилей, истории и метрик")
+    }
+}
+
+Rel(apps, api_gateway, "HTTPS запросы", "REST API")
+Rel(local_agent, api_gateway, "Синхронизация данных (период до 10 мин)", "REST API")
+Rel(api_gateway, api_controller, "Проксирует запросы пользователей", "HTTP")
+Rel(api_gateway, packet_receiver, "Проксирует пакеты от ферм", "HTTP")
+Rel(packet_receiver, inter_db, "Быстро сбрасывает сырой JSON пакет", "Redis Protocol")
+Rel(metrics_engine, inter_db, "Читает сырую телеметрию для анализа", "Redis Protocol")
+Rel(api_controller, metrics_engine, "Запрос текущих показателей")
+Rel(api_controller, custom_metrics_constructor, "Запрос аналитики по кастомным формулам")
+Rel(metrics_engine, central_db, "Сохраняет рассчитанные метрики и историю", "SQL")
+Rel(custom_metrics_constructor, central_db, "Чтение метаданных формул и запись результатов", "SQL")
+Rel(central_db, ext_ai, "Экспорт исторических данных для обучения моделей", "REST API")
+@enduml

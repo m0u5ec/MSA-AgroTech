@@ -1,0 +1,51 @@
+@startuml
+!include <C4/C4_Component>
+
+LAYOUT_WITH_LEGEND()
+
+title Ядро платформы «ФармПром X» (Центральный сервер)
+
+' Внешние сущности по отношению к Ядру
+Container(apps, "Приложения пользователя", "Web / Mobile", "Интерфейс для фермеров и администрации")
+Container(local_agent, "Локальный агент фермы", "gRPC / MQTT клиент", "Отправляет накопленные батчи данных и события")
+ContainerDb(central_db, "Центральная БД", "PostgreSQL / TimescaleDB", "Хранилище профилей, истории и метрик")
+System_Ext(ext_ai, "ИИ-модель трекинга животных", "Внешний сервис глубокой аналитики видео")
+
+' ЯДРО ПЛАТФОРМЫ
+Container_Boundary(core_server, "Ядро платформы (Центральный сервер / Облако)") {
+
+    ' Слой балансировки
+    Component(lb, "Балансировщик запросов", "Traefik", "Маршрутизация трафика, SSL-терминация и балансировка нагрузки")
+    Component(sso, "SSO Сервис авторизации", "Keycloak", "Управление пользователями, ролями и валидация JWT-токенов [Ф13]")
+
+    ' Шлюз синхронизации (Kafka)
+    Container_Boundary(sync_gateway_layer, "Шлюз синхронизации агентов") {
+        Component(packet_receiver, "Приемщик пакетов", "Go / gRPC Server", "Принимает входящие батчи телеметрии и логов от ферм")
+        ComponentDb(kafka, "Apache Kafka", "Message Broker", "Очереди сообщений для отказоустойчивой обработки потоков данных")
+        Component(kafka_consumer, "Стриминг-консьюмер", "Python / Worker", "Асинхронно вычитывает данные из Kafka и распределяет по модулям/БД")
+    }
+
+    ' Бизнес-логика
+    Container_Boundary(business_logic_layer, "Модуль бизнес-логики и метрик") {
+        Component(api_controller, "Контроллер API приложений", "Python / FastAPI", "Обработка REST API запросов пользовательских интерфейсов")
+        Component(metrics_engine, "Движок расчета метрик", "Python", "Расчет базовых метрик поголовья и кормов")
+        Component(custom_metrics_constructor, "Конструктор пользовательских метрик", "Python", "Парсинг и выполнение кастомных формул администраторов")
+    }
+}
+
+Rel(apps, lb, "HTTPS запросы", "REST API")
+Rel(local_agent, lb, "Синхронизация данных (период до 10 мин)", "gRPC / TLS")
+Rel(lb, sso, "Проверка токена / Аутентификация", "Внутренний REST")
+Rel(lb, api_controller, "Проксирование запросов пользователей", "HTTP")
+Rel(lb, packet_receiver, "Проксирование потоков от агентов", "gRPC")
+Rel(packet_receiver, kafka, "Публикует сырые батчи в топики", "Kafka Protocol")
+Rel(kafka, kafka_consumer, "Считывает сообщения из топиков", "Kafka Protocol")
+Rel(kafka_consumer, central_db, "Записывает очищенные события и телеметрию ферм", "SQL")
+Rel(api_controller, metrics_engine, "Запрос текущих показателей")
+Rel(api_controller, custom_metrics_constructor, "Запрос аналитики по кастомным формулам")
+Rel(metrics_engine, central_db, "Чтение истории и агрегатов", "SQL")
+Rel(custom_metrics_constructor, central_db, "Чтение метаданных формул и метрик", "SQL")
+Rel(kafka_consumer,metrics_engine,"Преобразование данных при необходимости","REST")
+Rel(central_db, ext_ai, "Экспорт исторических данных для обучения моделей", "gRPC / REST")
+
+@enduml

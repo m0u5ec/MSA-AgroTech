@@ -1,0 +1,92 @@
+@startuml
+!theme plain
+skinparam classAttributeIconSize 0
+
+title Прием пакетов в Redis и расчет метрик (MVP)
+
+package "Transport Layer (FastAPI)" {
+    class PacketReceiverController {
+        - buffer_repo: IBufferRepository
+        + receive_batch(farm_id: String, payload: BatchSchema): HTTPStatus
+    }
+
+    class APIAppsController {
+        - metrics_engine: MetricsEngine
+        + get_current_metrics(farm_id: String): MetricsResponse
+    }
+}
+
+package "Data Validation & Schemas" {
+    class BatchSchema <<Pydantic>> {
+        + farm_id: String
+        + timestamp: DateTime
+        + telemetry: List<DeviceData>
+        + video_metadata: List<VideoFrameLog>
+    }
+}
+
+package "Buffer Storage Domain (Redis)" {
+    interface IBufferRepository {
+        + save_raw_packet(farm_id: String, data: String): Void
+        + fetch_raw_packets(farm_id: String): List<String>
+        + clear_processed_packets(farm_id: String, up_to_id: String): Void
+    }
+
+    class RedisBufferRepository {
+        - redis_client: RedisAsyncCluster
+        + save_raw_packet(farm_id: String, data: String): Void
+        + fetch_raw_packets(farm_id: String): List<String>
+        + clear_processed_packets(farm_id: String, up_to_id: String): Void
+    }
+}
+
+package "Business Logic Domain" {
+    class MetricsEngine {
+        - buffer_repo: IBufferRepository
+        - pg_repo: ITelemetryRepository
+        + calculate_and_persist_metrics(farm_id: String): FarmMetrics
+        - parse_raw_json(raw_json: String): TelemetryData
+    }
+}
+
+package "Persistent Storage Domain (PostgreSQL)" {
+    interface ITelemetryRepository {
+        + save_metrics(metrics: FarmMetrics): Void
+        + get_historical_metrics(farm_id: String): List<FarmMetrics>
+    }
+
+    class PostgresTelemetryRepository {
+        - db_session: AsyncSession
+        + save_metrics(metrics: FarmMetrics): Void
+        + get_historical_metrics(farm_id: String): List<FarmMetrics>
+    }
+}
+
+IBufferRepository <|.. RedisBufferRepository
+ITelemetryRepository <|.. PostgresTelemetryRepository
+
+PacketReceiverController --> IBufferRepository : быстро сбрасывает данные
+PacketReceiverController ..> BatchSchema : валидирует на входе
+APIAppsController --> MetricsEngine : запрашивает расчет
+
+MetricsEngine --> IBufferRepository : вычитывает сырой JSON
+MetricsEngine --> ITelemetryRepository : сохраняет агрегаты
+
+note top of PacketReceiverController
+  **Поток 1: Сверхбыстрый прием данных (REST API -> Redis)**
+  1. Агент фермы присылает HTTP POST.
+  2. ""PacketReceiverController"" проверяет структуру через ""BatchSchema"".
+  3. JSON улетает в ""RedisBufferRepository.save_raw_packet()""
+  4. Агент получает ""202 Accepted"".
+end note
+
+note top of MetricsEngine
+  **Поток 2: Ленивая обработка и чтение (По запросу / Таймауту)**
+  1. ""APIAppsController"" запрашивает метрики для отображения фермеру.
+  2. ""MetricsEngine"" просыпается, вызывает ""fetch_raw_packets()"" из Redis.
+  3. Парсит сырой JSON, рассчитывает базовые метрики.
+  4. Скидывает рассчитанные данные в ""PostgresTelemetryRepository"" для истории.
+  5. Возвращает готовый ответ пользователю в приложение.
+end note
+
+@enduml
