@@ -1,0 +1,75 @@
+@startuml
+!theme plain
+skinparam classAttributeIconSize 0
+
+title Шлюз приема пакетов и публикация в Kafka
+
+package "gRPC Transport Layer" {
+    interface FarmPromSyncServicer {
+        + SyncBatch(request: BatchRequest, context: gRPCContext): BatchResponse
+    }
+
+    class AgentSyncService {
+        - authService: IAuthValidator
+        - validator: IBatchValidator
+        - publisher: IKafkaPublisher
+        + SyncBatch(request: BatchRequest, context: gRPCContext): BatchResponse
+    }
+}
+
+package "Security Domain" {
+    interface IAuthValidator {
+        + ValidateToken(jwtToken: String): Claims
+    }
+
+    class KeycloakTokenValidator {
+        - jwksUrl: String
+        - cache: LocalCache
+        + ValidateToken(jwtToken: String): Claims
+        - FetchJwksKeys(): Void
+    }
+}
+
+package "Business Validation Domain" {
+    interface IBatchValidator {
+        + Validate(batch: BatchRequest): ValidationResult
+    }
+
+    class TelemetryBatchValidator {
+        - allowedTimeDriftMinutes: Int
+        + Validate(batch: BatchRequest): ValidationResult
+        - CheckDeviceRegistry(deviceId: String): Boolean
+    }
+}
+
+package "Infrastructure / Messaging" {
+    interface IKafkaPublisher {
+        + PublishEvent(topic: String, key: String, payload: Byte[]): Future
+    }
+
+    class ConfluentKafkaPublisher {
+        - producer: KafkaProducer
+        - schemaRegistryUrl: String
+        + PublishEvent(topic: String, key: String, payload: Byte[]): Future
+        - SerializeToAvro(data: Object): Byte[]
+    }
+}
+
+FarmPromSyncServicer <|.. AgentSyncService
+IAuthValidator <|.. KeycloakTokenValidator
+IBatchValidator <|.. TelemetryBatchValidator
+IKafkaPublisher <|.. ConfluentKafkaPublisher
+
+AgentSyncService --> IAuthValidator : использует для проверки JWT
+AgentSyncService --> IBatchValidator : использует для проверки бизнес-логики
+AgentSyncService --> IKafkaPublisher : использует для сброса данных в шину
+
+note top of AgentSyncService
+  **Паттерн взаимодействия (Поток выполнения метода SyncBatch):**
+  1. Извлекается токинг из gRPC Metadata -> Передается в ""IAuthValidator""
+  2. Если авторизация успешна, объект ""BatchRequest"" уходит в ""IBatchValidator""
+  3. Проверенные данные сериализуются и через ""IKafkaPublisher"" пушатся в Kafka
+  4. Агенту возвращается статус ""200 OK / SUCCESS"" в течение миллисекунд
+end note
+
+@enduml
